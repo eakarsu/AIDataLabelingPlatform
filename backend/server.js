@@ -2,6 +2,7 @@ require('dotenv').config({ path: '../.env' });
 
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { Pool } = require('pg');
@@ -10,8 +11,22 @@ const app = express();
 const PORT = process.env.BACKEND_PORT || 4001;
 const JWT_SECRET = process.env.JWT_SECRET || 'ai-labeling-platform-secret-key-2024';
 
-// Middleware
-app.use(cors());
+// ─── Security Middleware ─────────────────────────────────────────────────────
+// Helmet sets sane HTTP security headers (disable CSP because the SPA handles its own).
+app.use(helmet({ contentSecurityPolicy: false, crossOriginResourcePolicy: { policy: 'cross-origin' } }));
+
+// CORS — allow specific origins from CORS_ORIGINS env (comma-separated). Falls back to '*' in dev.
+const corsOrigins = (process.env.CORS_ORIGINS || '*')
+  .split(',')
+  .map((o) => o.trim())
+  .filter(Boolean);
+app.use(
+  cors({
+    origin: corsOrigins.includes('*') ? true : corsOrigins,
+    credentials: true,
+  })
+);
+
 app.use(express.json({ limit: '10mb' }));
 
 // Database
@@ -358,7 +373,7 @@ async function callOpenRouter(prompt) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: process.env.OPENROUTER_MODEL || 'anthropic/claude-haiku-4.5',
+      model: process.env.OPENROUTER_MODEL || 'anthropic/claude-3-5-sonnet-20241022',
       messages: [{ role: 'user', content: prompt }],
     }),
   });
@@ -574,7 +589,7 @@ Respond with ONLY a JSON object in this exact format (no markdown, no extra text
       [
         name || 'Auto-label run',
         project_id || null,
-        process.env.OPENROUTER_MODEL || 'anthropic/claude-haiku-4.5',
+        process.env.OPENROUTER_MODEL || 'anthropic/claude-3-5-sonnet-20241022',
         input_text,
         parsed.label,
         parsed.confidence || 0,
@@ -1535,6 +1550,25 @@ buildCrudRoutes(templatesRouter, 'templates', 'Template', [
 ]);
 app.use('/api/templates', templatesRouter);
 
+// ─── New Feature Routes ───────────────────────────────────────────────────────
+
+app.use('/api/auto-label', require('./routes/autoLabeling'));
+app.use('/api/analytics', require('./routes/analytics'));
+// Also expose /api/ai/label-suggestions alongside existing /api/ai/* inline routes
+app.use('/api/ai', require('./routes/analytics'));
+
+app.use('/api/ai', require('./routes/activeLearning'));
+
+app.use('/api/ai', require('./routes/crowdConsensus'));
+
+app.use('/api/ai', require('./routes/labelQuality'));
+
+app.use('/api/ai', require('./routes/similarityCluster'));
+
+app.use('/api/ai', require('./routes/labelerScoring'));
+app.use('/api/export', require('./routes/export'));
+app.use('/api/ai-features', require('./routes/aiFeatures'));
+
 // ─── Health Check ────────────────────────────────────────────────────────────
 
 app.get('/api/health', (req, res) => {
@@ -1545,6 +1579,27 @@ app.get('/api/health', (req, res) => {
 
 async function start() {
   await initDatabase();
+// // === Batch 02 Gaps & Frontend Mounts ===
+app.use('/api/gap-missing-auto-label-suggest-labels-detect-disagreement-identi', require('./routes/gap_missing_auto_label_suggest_labels_detect_disagreement_identi'));
+
+// // === Batch 02 Gaps & Frontend Mounts ===
+app.use('/api/gap-no-dataset-management-or-versioning-surface', require('./routes/gap_no_dataset_management_or_versioning_surface'));
+
+// // === Batch 02 Gaps & Frontend Mounts ===
+app.use('/api/gap-no-user-labeler-management-and-quality-control-workflows', require('./routes/gap_no_user_labeler_management_and_quality_control_workflows'));
+
+// // === Batch 02 Gaps & Frontend Mounts ===
+app.use('/api/gap-no-label-schema-definition-and-validation-engine', require('./routes/gap_no_label_schema_definition_and_validation_engine'));
+
+// // === Batch 02 Gaps & Frontend Mounts ===
+app.use('/api/gap-no-integration-with-ml-training-pipelines', require('./routes/gap_no_integration_with_ml_training_pipelines'));
+
+// // === Batch 02 Gaps & Frontend Mounts ===
+app.use('/api/gap-no-payment-billing-module', require('./routes/gap_no_payment_billing_module'));
+
+// // === Batch 02 Gaps & Frontend Mounts ===
+app.use('/api/gap-no-calendar-integration', require('./routes/gap_no_calendar_integration'));
+
   app.listen(PORT, () => {
     console.log(`AI Data Labeling Platform backend running on port ${PORT}`);
   });

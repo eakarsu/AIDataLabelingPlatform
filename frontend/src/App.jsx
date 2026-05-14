@@ -17,6 +17,7 @@ import Webhooks from './pages/Webhooks';
 import AuditLog from './pages/AuditLog';
 import Analytics from './pages/Analytics';
 import AIServices from './pages/AIServices';
+import AIFeatures from './pages/AIFeatures';
 import Profile from './pages/Profile';
 import Notifications from './pages/Notifications';
 import Comments from './pages/Comments';
@@ -28,6 +29,20 @@ import ActivityFeed from './pages/ActivityFeed';
 import SavedFilters from './pages/SavedFilters';
 import Templates from './pages/Templates';
 
+// // === Batch 02 Gaps & Frontend Mounts ===
+import CfActiveLearningEngine from './pages/CfActiveLearningEngine';
+import CfCrowdConsensusConflictResolution from './pages/CfCrowdConsensusConflictResolution';
+import CfLabelQualityPrediction from './pages/CfLabelQualityPrediction';
+import CfSemanticSimilarityClustering from './pages/CfSemanticSimilarityClustering';
+import CfLabelerQualityScoring from './pages/CfLabelerQualityScoring';
+import GapMissingAutoLabelSuggestLabelsDetectDisagreementIdenti from './pages/GapMissingAutoLabelSuggestLabelsDetectDisagreementIdenti';
+import GapNoDatasetManagementOrVersioningSurface from './pages/GapNoDatasetManagementOrVersioningSurface';
+import GapNoUserLabelerManagementAndQualityControlWorkflows from './pages/GapNoUserLabelerManagementAndQualityControlWorkflows';
+import GapNoLabelSchemaDefinitionAndValidationEngine from './pages/GapNoLabelSchemaDefinitionAndValidationEngine';
+import GapNoIntegrationWithMlTrainingPipelines from './pages/GapNoIntegrationWithMlTrainingPipelines';
+import GapNoPaymentBillingModule from './pages/GapNoPaymentBillingModule';
+import GapNoCalendarIntegration from './pages/GapNoCalendarIntegration';
+
 const navItems = [
   { path: '/dashboard', label: 'Dashboard', icon: '🏠' },
   { path: '/projects', label: 'Projects', icon: '📁' },
@@ -38,6 +53,7 @@ const navItems = [
   { path: '/auto-label', label: 'Auto Label', icon: '🤖' },
   { path: '/reviews', label: 'Reviews', icon: '🔍' },
   { path: '/ai-services', label: 'AI Services', icon: '🧠' },
+  { path: '/ai-features', label: 'AI Features', icon: '🧪' },
   { path: '/guidelines', label: 'Guidelines', icon: '📖' },
   { path: '/comments', label: 'Comments', icon: '💬' },
   { path: '/data-imports', label: 'Data Imports', icon: '📥' },
@@ -79,6 +95,20 @@ function App() {
       <Routes>
         <Route path="/login" element={<Login onLogin={() => setIsAuthenticated(true)} />} />
         <Route path="*" element={<Navigate to="/login" />} />
+      
+        {/* // === Batch 02 Gaps & Frontend Mounts === */}
+        <Route path="/cf/active-learning-engine" element={<CfActiveLearningEngine />} />
+        <Route path="/cf/crowd-consensus-conflict-resolution" element={<CfCrowdConsensusConflictResolution />} />
+        <Route path="/cf/label-quality-prediction" element={<CfLabelQualityPrediction />} />
+        <Route path="/cf/semantic-similarity-clustering" element={<CfSemanticSimilarityClustering />} />
+        <Route path="/cf/labeler-quality-scoring" element={<CfLabelerQualityScoring />} />
+        <Route path="/gap/missing-auto-label-suggest-labels-detect-disagreement-identi" element={<GapMissingAutoLabelSuggestLabelsDetectDisagreementIdenti />} />
+        <Route path="/gap/no-dataset-management-or-versioning-surface" element={<GapNoDatasetManagementOrVersioningSurface />} />
+        <Route path="/gap/no-user-labeler-management-and-quality-control-workflows" element={<GapNoUserLabelerManagementAndQualityControlWorkflows />} />
+        <Route path="/gap/no-label-schema-definition-and-validation-engine" element={<GapNoLabelSchemaDefinitionAndValidationEngine />} />
+        <Route path="/gap/no-integration-with-ml-training-pipelines" element={<GapNoIntegrationWithMlTrainingPipelines />} />
+        <Route path="/gap/no-payment-billing-module" element={<GapNoPaymentBillingModule />} />
+        <Route path="/gap/no-calendar-integration" element={<GapNoCalendarIntegration />} />
       </Routes>
     );
   }
@@ -126,6 +156,7 @@ function App() {
           <Route path="/auto-label" element={<AutoLabel />} />
           <Route path="/reviews" element={<Reviews />} />
           <Route path="/ai-services" element={<AIServices />} />
+          <Route path="/ai-features" element={<AIFeatures />} />
           <Route path="/guidelines" element={<Guidelines />} />
           <Route path="/comments" element={<Comments />} />
           <Route path="/data-imports" element={<DataImports />} />
