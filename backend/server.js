@@ -1600,6 +1600,9 @@ app.use('/api/gap-no-payment-billing-module', require('./routes/gap_no_payment_b
 // // === Batch 02 Gaps & Frontend Mounts ===
 app.use('/api/gap-no-calendar-integration', require('./routes/gap_no_calendar_integration'));
 
+// === Custom Views (mounted BEFORE 404) ===
+app.use('/api/custom-views', require('./routes/customViews'));
+
   app.listen(PORT, () => {
     console.log(`AI Data Labeling Platform backend running on port ${PORT}`);
   });

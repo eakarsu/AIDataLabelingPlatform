@@ -28,6 +28,7 @@ import Tags from './pages/Tags';
 import ActivityFeed from './pages/ActivityFeed';
 import SavedFilters from './pages/SavedFilters';
 import Templates from './pages/Templates';
+import CustomViewsPage from './pages/CustomViewsPage';
 
 // // === Batch 02 Gaps & Frontend Mounts ===
 import CfActiveLearningEngine from './pages/CfActiveLearningEngine';
@@ -70,6 +71,7 @@ const navItems = [
   { path: '/saved-filters', label: 'Saved Filters', icon: '💾' },
   { path: '/audit-log', label: 'Audit Log', icon: '📋' },
   { path: '/analytics', label: 'Analytics', icon: '📉' },
+  { path: '/custom-views', label: 'Labeling Views', icon: '🗂️' },
   { path: '/profile', label: 'Profile', icon: '👤' },
 ];
 
@@ -173,6 +175,7 @@ function App() {
           <Route path="/saved-filters" element={<SavedFilters />} />
           <Route path="/audit-log" element={<AuditLog />} />
           <Route path="/analytics" element={<Analytics />} />
+          <Route path="/custom-views" element={<CustomViewsPage />} />
           <Route path="/profile" element={<Profile />} />
           <Route path="*" element={<Navigate to="/dashboard" />} />
         </Routes>
