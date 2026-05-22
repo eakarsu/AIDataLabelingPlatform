@@ -44,6 +44,12 @@ import GapNoIntegrationWithMlTrainingPipelines from './pages/GapNoIntegrationWit
 import GapNoPaymentBillingModule from './pages/GapNoPaymentBillingModule';
 import GapNoCalendarIntegration from './pages/GapNoCalendarIntegration';
 
+import CodexCustomVizFeature from './pages/CodexCustomVizFeature';
+import CodexOperationsFeature from './pages/CodexOperationsFeature';
+
+import TimelineView from './pages/TimelineView';
+import SchemaDrift from './pages/SchemaDrift';
+
 const navItems = [
   { path: '/dashboard', label: 'Dashboard', icon: '🏠' },
   { path: '/projects', label: 'Projects', icon: '📁' },
@@ -72,6 +78,7 @@ const navItems = [
   { path: '/audit-log', label: 'Audit Log', icon: '📋' },
   { path: '/analytics', label: 'Analytics', icon: '📉' },
   { path: '/custom-views', label: 'Labeling Views', icon: '🗂️' },
+  { path: '/schema-drift', label: 'Schema Drift', icon: '🧭' },
   { path: '/profile', label: 'Profile', icon: '👤' },
 ];
 
@@ -95,6 +102,10 @@ function App() {
   if (!isAuthenticated || location.pathname === '/login') {
     return (
       <Routes>
+        <Route path="/insights/timeline" element={<TimelineView />} />
+        <Route path="/codex/custom-viz" element={<CodexCustomVizFeature />} />
+        <Route path="/codex/operations" element={<CodexOperationsFeature />} />
+
         <Route path="/login" element={<Login onLogin={() => setIsAuthenticated(true)} />} />
         <Route path="*" element={<Navigate to="/login" />} />
       
@@ -176,6 +187,7 @@ function App() {
           <Route path="/audit-log" element={<AuditLog />} />
           <Route path="/analytics" element={<Analytics />} />
           <Route path="/custom-views" element={<CustomViewsPage />} />
+          <Route path="/schema-drift" element={<SchemaDrift />} />
           <Route path="/profile" element={<Profile />} />
           <Route path="*" element={<Navigate to="/dashboard" />} />
         </Routes>

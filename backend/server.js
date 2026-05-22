@@ -28,6 +28,7 @@ app.use(
 );
 
 app.use(express.json({ limit: '10mb' }));
+app.use('/api/schema-drift', require('./routes/schemaDrift'));
 
 // Database
 const pool = new Pool({
