@@ -5,7 +5,9 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js"
+    "dev": "node --watch server.js",
+    "db:init": "node schema.js",
+    "test:policy": "node --test tests/governedWorkflow.test.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

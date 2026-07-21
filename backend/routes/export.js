@@ -7,14 +7,11 @@ const router = express.Router();
 const { Pool } = require('pg');
 const jwt = require('jsonwebtoken');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'ai-labeling-platform-secret-key-2024';
+const JWT_SECRET = process.env.JWT_SECRET;
 
 const pool = new Pool({
-  host: process.env.DB_HOST || 'localhost',
-  port: parseInt(process.env.DB_PORT || '5432'),
-  database: process.env.DB_NAME || 'ai_labeling_platform',
-  user: process.env.DB_USER || 'erolakarsu',
-  password: process.env.DB_PASSWORD || '',
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: true } : undefined,
 });
 
 function authMiddleware(req, res, next) {

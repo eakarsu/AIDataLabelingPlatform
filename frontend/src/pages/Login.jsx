@@ -28,11 +28,6 @@ export default function Login({ onLogin }) {
     }
   };
 
-  const handleQuickLogin = () => {
-    setEmail('admin@labelai.com');
-    setPassword('password123');
-  };
-
   return (
     <div className="login-container">
       <div className="login-card">
@@ -79,13 +74,6 @@ export default function Login({ onLogin }) {
 
         <div className="quick-login-divider">or</div>
 
-        <button
-          type="button"
-          className="btn btn-secondary btn-full"
-          onClick={handleQuickLogin}
-        >
-          ⚡ Quick Login (Auto-populate credentials)
-        </button>
       </div>
     </div>
   );

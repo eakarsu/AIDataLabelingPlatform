@@ -10,16 +10,13 @@ const jwt = require('jsonwebtoken');
 const { aiRateLimiter } = require('../middleware/rateLimiter');
 const { parseAIJson } = require('../middleware/parseAIJson');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'ai-labeling-platform-secret-key-2024';
+const JWT_SECRET = process.env.JWT_SECRET;
 const MODEL = process.env.OPENROUTER_MODEL || 'anthropic/claude-3-5-sonnet-20241022';
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
 const pool = new Pool({
-  host: process.env.DB_HOST || 'localhost',
-  port: parseInt(process.env.DB_PORT || '5432'),
-  database: process.env.DB_NAME || 'ai_labeling_platform',
-  user: process.env.DB_USER || 'erolakarsu',
-  password: process.env.DB_PASSWORD || '',
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: true } : undefined,
 });
 
 // Auth middleware

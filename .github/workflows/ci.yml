@@ -1,0 +1,52 @@
+name: governed-workflow-ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+      - name: Backend dependencies
+        working-directory: backend
+        run: npm ci
+      - name: Governed policy tests
+        working-directory: backend
+        run: npm run test:policy
+      - name: Backend syntax
+        working-directory: backend
+        run: |
+          node --check server.js
+          node --check routes/governedWorkflow.js
+          node --check domain/governedWorkflow.js
+      - name: Frontend build
+        working-directory: frontend
+        env:
+          CI: "false"
+        run: |
+          npm ci
+          npm run build
+      - name: Operational script syntax
+        run: |
+          bash -n start.sh
+          bash -n scripts/bootstrap.sh
+          bash -n scripts/migrate.sh
+          bash -n scripts/seed-demo.sh
+      - name: Migration safety contract
+        run: |
+          grep -q "governed_events_append_only" backend/migrations/002_governed_workflow.sql
+          grep -q "credential_ref LIKE 'vault://%'" backend/migrations/002_governed_workflow.sql
+

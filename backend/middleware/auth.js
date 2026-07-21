@@ -8,7 +8,7 @@
  *   router.get('/x', auth, h);     // or per-handler
  */
 const jwt = require('jsonwebtoken');
-const JWT_SECRET = process.env.JWT_SECRET || 'ai-labeling-platform-secret-key-2024';
+const JWT_SECRET = process.env.JWT_SECRET;
 
 function auth(req, res, next) {
   const authHeader = req.headers.authorization;
@@ -17,6 +17,9 @@ function auth(req, res, next) {
   }
   const token = authHeader.split(' ')[1];
   try {
+    if (!JWT_SECRET || JWT_SECRET.length < 32) {
+      return res.status(503).json({ error: 'Authentication is not configured' });
+    }
     req.user = jwt.verify(token, JWT_SECRET);
     next();
   } catch {

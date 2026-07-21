@@ -5,11 +5,19 @@ const cors = require('cors');
 const helmet = require('helmet');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const { Pool } = require('pg');
 
 const app = express();
 const PORT = process.env.BACKEND_PORT || 4001;
-const JWT_SECRET = process.env.JWT_SECRET || 'ai-labeling-platform-secret-key-2024';
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET || JWT_SECRET.length < 32) {
+  throw new Error('JWT_SECRET must be configured with at least 32 characters');
+}
+if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL is required');
+if (process.env.NODE_ENV === 'production' && (!process.env.CORS_ORIGINS || process.env.CORS_ORIGINS.includes('*'))) {
+  throw new Error('Production CORS_ORIGINS must be an explicit allowlist');
+}
 
 // ─── Security Middleware ─────────────────────────────────────────────────────
 // Helmet sets sane HTTP security headers (disable CSP because the SPA handles its own).
@@ -32,11 +40,8 @@ app.use('/api/schema-drift', require('./routes/schemaDrift'));
 
 // Database
 const pool = new Pool({
-  host: process.env.DB_HOST || 'localhost',
-  port: parseInt(process.env.DB_PORT || '5432'),
-  database: process.env.DB_NAME || 'ai_labeling_platform',
-  user: process.env.DB_USER || 'erolakarsu',
-  password: process.env.DB_PASSWORD || '',
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: true } : undefined,
 });
 
 // ─── JWT Auth Middleware ─────────────────────────────────────────────────────
@@ -56,9 +61,9 @@ function authMiddleware(req, res, next) {
   }
 }
 
-// Apply auth to all /api routes except /api/auth/* and /api/seed
+// Apply auth to all /api routes except authentication and health.
 app.use('/api', (req, res, next) => {
-  if (req.path.startsWith('/auth') || req.path === '/seed' || req.path === '/health') {
+  if (req.path.startsWith('/auth') || req.path === '/health') {
     return next();
   }
   authMiddleware(req, res, next);
@@ -346,6 +351,7 @@ async function initDatabase() {
     console.log('Database tables initialized successfully');
   } catch (err) {
     console.error('Database initialization error:', err.message);
+    throw err;
   } finally {
     client.release();
   }
@@ -469,7 +475,7 @@ function buildCrudRoutes(router, tableName, resourceName, columns) {
 
 app.post('/api/auth/register', async (req, res) => {
   try {
-    const { email, password, name, role } = req.body;
+    const { email, password, name } = req.body;
     if (!email || !password || !name) {
       return res.status(400).json({ error: 'Email, password, and name are required' });
     }
@@ -479,11 +485,11 @@ app.post('/api/auth/register', async (req, res) => {
     }
     const hashedPassword = await bcrypt.hash(password, 10);
     const result = await pool.query(
-      'INSERT INTO users (email, password, name, role) VALUES ($1, $2, $3, $4) RETURNING id, email, name, role, created_at',
-      [email, hashedPassword, name, role || 'annotator']
+      'INSERT INTO users (email, password, name, role, tenant_id) VALUES ($1, $2, $3, $4, $5) RETURNING id, email, name, role, tenant_id, created_at',
+      [email, hashedPassword, name, 'annotator', crypto.randomUUID()]
     );
     const user = result.rows[0];
-    const token = jwt.sign({ id: user.id, email: user.email, name: user.name, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
+    const token = jwt.sign({ id: user.id, email: user.email, name: user.name, role: user.role, tenant_id: user.tenant_id }, JWT_SECRET, { expiresIn: '24h' });
     res.status(201).json({ user, token });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -505,11 +511,24 @@ app.post('/api/auth/login', async (req, res) => {
     if (!valid) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
-    const token = jwt.sign({ id: user.id, email: user.email, name: user.name, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
+    const token = jwt.sign({ id: user.id, email: user.email, name: user.name, role: user.role, tenant_id: user.tenant_id }, JWT_SECRET, { expiresIn: '24h' });
     res.json({
       user: { id: user.id, email: user.email, name: user.name, role: user.role, created_at: user.created_at },
       token,
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/auth/me', authMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT id, email, name, role, tenant_id, created_at FROM users WHERE id = $1',
+      [req.user.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+    res.json({ user: result.rows[0] });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -818,6 +837,9 @@ Respond with ONLY a JSON object (no markdown, no extra text):
 // ─── Seed Data ───────────────────────────────────────────────────────────────
 
 app.post('/api/seed', async (req, res) => {
+  if (process.env.ALLOW_DEMO_SEED_ENDPOINT !== 'true' || process.env.NODE_ENV === 'production' || req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Demo seed endpoint is disabled' });
+  }
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -1569,6 +1591,7 @@ app.use('/api/ai', require('./routes/similarityCluster'));
 app.use('/api/ai', require('./routes/labelerScoring'));
 app.use('/api/export', require('./routes/export'));
 app.use('/api/ai-features', require('./routes/aiFeatures'));
+app.use('/api/governed-workflows', require('./routes/governedWorkflow')(pool));
 
 // ─── Health Check ────────────────────────────────────────────────────────────
 
@@ -1579,27 +1602,8 @@ app.get('/api/health', (req, res) => {
 // ─── Start Server ────────────────────────────────────────────────────────────
 
 async function start() {
-  await initDatabase();
-// // === Batch 02 Gaps & Frontend Mounts ===
-app.use('/api/gap-missing-auto-label-suggest-labels-detect-disagreement-identi', require('./routes/gap_missing_auto_label_suggest_labels_detect_disagreement_identi'));
-
-// // === Batch 02 Gaps & Frontend Mounts ===
-app.use('/api/gap-no-dataset-management-or-versioning-surface', require('./routes/gap_no_dataset_management_or_versioning_surface'));
-
-// // === Batch 02 Gaps & Frontend Mounts ===
-app.use('/api/gap-no-user-labeler-management-and-quality-control-workflows', require('./routes/gap_no_user_labeler_management_and_quality_control_workflows'));
-
-// // === Batch 02 Gaps & Frontend Mounts ===
-app.use('/api/gap-no-label-schema-definition-and-validation-engine', require('./routes/gap_no_label_schema_definition_and_validation_engine'));
-
-// // === Batch 02 Gaps & Frontend Mounts ===
-app.use('/api/gap-no-integration-with-ml-training-pipelines', require('./routes/gap_no_integration_with_ml_training_pipelines'));
-
-// // === Batch 02 Gaps & Frontend Mounts ===
-app.use('/api/gap-no-payment-billing-module', require('./routes/gap_no_payment_billing_module'));
-
-// // === Batch 02 Gaps & Frontend Mounts ===
-app.use('/api/gap-no-calendar-integration', require('./routes/gap_no_calendar_integration'));
+  // Migrations are an explicit operator action; startup only verifies connectivity.
+  await pool.query('SELECT 1');
 
 // === Custom Views (mounted BEFORE 404) ===
 app.use('/api/custom-views', require('./routes/customViews'));
@@ -1609,4 +1613,6 @@ app.use('/api/custom-views', require('./routes/customViews'));
   });
 }
 
-start();
+if (require.main === module) start();
+
+module.exports = { app, pool, initDatabase, start };
