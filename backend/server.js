@@ -44,6 +44,12 @@ const pool = new Pool({
   ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: true } : undefined,
 });
 
+function requireDemoPassword() {
+  const value = String(process.env.DEMO_PASSWORD || process.env.SEED_DEMO_PASSWORD || '');
+  if (value.length < 12 || value.length > 72) throw new Error('DEMO_PASSWORD must contain 12-72 characters');
+  return value;
+}
+
 // ─── JWT Auth Middleware ─────────────────────────────────────────────────────
 
 function authMiddleware(req, res, next) {
@@ -877,27 +883,27 @@ app.post('/api/seed', async (req, res) => {
     }
 
     // ── Users (15+) ─────────────────────────────────────────────────────────
-    const adminPassword = await bcrypt.hash('password123', 10);
-    const userPassword = await bcrypt.hash('password123', 10);
+    const adminPassword = await bcrypt.hash(requireDemoPassword(), 10);
+    const userPassword = await bcrypt.hash(requireDemoPassword(), 10);
 
     await client.query(`
-      INSERT INTO users (email, password, name, role) VALUES
-      ('admin@labelai.com', $1, 'Admin User', 'admin'),
-      ('sarah.chen@labelai.com', $2, 'Sarah Chen', 'manager'),
-      ('james.wilson@labelai.com', $2, 'James Wilson', 'annotator'),
-      ('maria.garcia@labelai.com', $2, 'Maria Garcia', 'annotator'),
-      ('david.kim@labelai.com', $2, 'David Kim', 'reviewer'),
-      ('emma.johnson@labelai.com', $2, 'Emma Johnson', 'annotator'),
-      ('alex.thompson@labelai.com', $2, 'Alex Thompson', 'manager'),
-      ('priya.patel@labelai.com', $2, 'Priya Patel', 'annotator'),
-      ('lucas.brown@labelai.com', $2, 'Lucas Brown', 'reviewer'),
-      ('sofia.martinez@labelai.com', $2, 'Sofia Martinez', 'annotator'),
-      ('ryan.lee@labelai.com', $2, 'Ryan Lee', 'annotator'),
-      ('olivia.davis@labelai.com', $2, 'Olivia Davis', 'manager'),
-      ('ethan.wang@labelai.com', $2, 'Ethan Wang', 'annotator'),
-      ('ava.taylor@labelai.com', $2, 'Ava Taylor', 'reviewer'),
-      ('noah.anderson@labelai.com', $2, 'Noah Anderson', 'annotator')
-    `, [adminPassword, userPassword]);
+      INSERT INTO users (email, password, name, role, tenant_id) VALUES
+      ('admin@labelai.com', $1, 'Admin User', 'admin', $3),
+      ('sarah.chen@labelai.com', $2, 'Sarah Chen', 'manager', $3),
+      ('james.wilson@labelai.com', $2, 'James Wilson', 'annotator', $3),
+      ('maria.garcia@labelai.com', $2, 'Maria Garcia', 'annotator', $3),
+      ('david.kim@labelai.com', $2, 'David Kim', 'reviewer', $3),
+      ('emma.johnson@labelai.com', $2, 'Emma Johnson', 'annotator', $3),
+      ('alex.thompson@labelai.com', $2, 'Alex Thompson', 'manager', $3),
+      ('priya.patel@labelai.com', $2, 'Priya Patel', 'annotator', $3),
+      ('lucas.brown@labelai.com', $2, 'Lucas Brown', 'reviewer', $3),
+      ('sofia.martinez@labelai.com', $2, 'Sofia Martinez', 'annotator', $3),
+      ('ryan.lee@labelai.com', $2, 'Ryan Lee', 'annotator', $3),
+      ('olivia.davis@labelai.com', $2, 'Olivia Davis', 'manager', $3),
+      ('ethan.wang@labelai.com', $2, 'Ethan Wang', 'annotator', $3),
+      ('ava.taylor@labelai.com', $2, 'Ava Taylor', 'reviewer', $3),
+      ('noah.anderson@labelai.com', $2, 'Noah Anderson', 'annotator', $3)
+    `, [adminPassword, userPassword, crypto.randomUUID()]);
 
     // ── Projects (15) ───────────────────────────────────────────────────────
     await client.query(`
