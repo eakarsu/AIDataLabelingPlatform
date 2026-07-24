@@ -6,6 +6,9 @@ if [[ ! -f "$project_dir/.env" ]]; then
   echo "Missing .env; copy .env.example and configure it." >&2
   exit 1
 fi
+set -a
+source "$project_dir/.env"
+set +a
 for dir in "backend" "frontend"; do
   [[ "$dir" == "." ]] && check="$project_dir/node_modules" || check="$project_dir/$dir/node_modules"
   if [[ ! -d "$check" ]]; then
