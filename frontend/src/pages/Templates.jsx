@@ -1,3 +1,4 @@
+import { recordRows } from '../recordRows';
 import React, { useState, useEffect, useCallback } from 'react';
 import api from '../api';
 
@@ -31,7 +32,7 @@ export default function Templates() {
     setLoading(true);
     try {
       const res = await api.get('/templates');
-      setItems(Array.isArray(res.data) ? res.data : res.data.data || []);
+      setItems(recordRows(res.data));
     } catch { setItems([]); }
     setLoading(false);
   }, []);

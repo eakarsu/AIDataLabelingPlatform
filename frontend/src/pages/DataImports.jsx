@@ -1,3 +1,4 @@
+import { recordRows } from '../recordRows';
 import React, { useState, useEffect, useCallback } from 'react';
 import api from '../api';
 
@@ -22,7 +23,7 @@ export default function DataImports() {
     setLoading(true);
     try {
       const res = await api.get('/data-imports');
-      setItems(Array.isArray(res.data) ? res.data : res.data.data || []);
+      setItems(recordRows(res.data));
     } catch { setItems([]); }
     setLoading(false);
   }, []);

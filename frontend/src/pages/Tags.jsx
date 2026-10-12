@@ -1,3 +1,4 @@
+import { recordRows } from '../recordRows';
 import React, { useState, useEffect, useCallback } from 'react';
 import api from '../api';
 
@@ -27,8 +28,8 @@ export default function Tags() {
         api.get('/tags'),
         api.get('/resource-tags'),
       ]);
-      setItems(Array.isArray(tagsRes.data) ? tagsRes.data : tagsRes.data.data || []);
-      setResourceTags(Array.isArray(rtRes.data) ? rtRes.data : rtRes.data.data || []);
+      setItems(recordRows(tagsRes.data));
+      setResourceTags(recordRows(rtRes.data));
     } catch {
       setItems([]);
       setResourceTags([]);

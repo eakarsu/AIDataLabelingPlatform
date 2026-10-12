@@ -659,6 +659,10 @@ body {
   border-top: 1px solid var(--border);
 }
 
+.modal-footer-centered {
+  justify-content: center;
+}
+
 /* ============ Detail Panel ============ */
 .detail-grid {
   display: grid;
@@ -744,6 +748,13 @@ body {
   color: var(--text-secondary);
   font-size: 13px;
   margin-bottom: 20px;
+}
+
+.ai-run-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
 }
 
 .ai-result-card {

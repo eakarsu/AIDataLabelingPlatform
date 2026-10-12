@@ -1,3 +1,4 @@
+import { recordRows } from '../recordRows';
 import React, { useState, useEffect, useCallback } from 'react';
 import api from '../api';
 
@@ -38,7 +39,7 @@ export default function ActivityFeed() {
     setLoading(true);
     try {
       const res = await api.get('/activity-feed');
-      setActivities(Array.isArray(res.data) ? res.data : res.data.data || []);
+      setActivities(recordRows(res.data));
     } catch {
       setActivities([]);
     }

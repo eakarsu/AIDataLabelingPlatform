@@ -1,7 +1,15 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { recordRows } from '../recordRows';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../api';
+import AIReport from '../components/AIReport';
+import { PresetButtons } from '../components/FullFieldPresets';
 
 const EMPTY = { name: '', input_text: '', project_id: '', description: '' };
+const AUTO_LABEL_PRESETS = [
+  { label: 'Support sentiment', values: { runText: 'The replacement arrived today and works well, but support took five days to answer my original request.' } },
+  { label: 'Urgent billing issue', values: { runText: 'I was charged twice for invoice INV-2048 and need the duplicate payment refunded before the account closes on Friday.' } },
+  { label: 'Neutral product note', values: { runText: 'The annotation export contains 1,250 records in JSONL format and was created on October 8, 2026.' } },
+];
 
 function Toast({ message, type, onClose }) {
   useEffect(() => { const t = setTimeout(onClose, 3000); return () => clearTimeout(t); }, [onClose]);
@@ -9,49 +17,7 @@ function Toast({ message, type, onClose }) {
 }
 
 function AIResultDisplay({ result }) {
-  if (!result) return null;
-  let obj = result;
-  if (typeof result === 'string') {
-    try { obj = JSON.parse(result); } catch { obj = null; }
-  }
-
-  if (obj && typeof obj === 'object') {
-    return (
-      <div className="ai-result-card">
-        <div className="ai-result-header">AI Prediction Result</div>
-        {obj.label && (
-          <div className="sentiment-display" style={{ marginBottom: 16 }}>
-            <div className="sentiment-badge sentiment-positive" style={{ fontSize: '1.2rem', padding: '12px 24px' }}>
-              {obj.label}
-            </div>
-          </div>
-        )}
-        {obj.confidence != null && (
-          <div className="classification-item" style={{ marginBottom: 16 }}>
-            <span className="classification-label">Confidence</span>
-            <div className="classification-bar-bg">
-              <div className="classification-bar-fill" style={{ width: `${(obj.confidence * 100)}%`, background: 'linear-gradient(90deg, #3b82f6, #8b5cf6)' }}>
-                {(obj.confidence * 100).toFixed(0)}%
-              </div>
-            </div>
-          </div>
-        )}
-        {obj.reasoning && (
-          <div className="summary-card" style={{ marginTop: 12 }}>
-            <strong>Reasoning:</strong> {obj.reasoning}
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  // Fallback plain text
-  return (
-    <div className="ai-result-card">
-      <div className="ai-result-header">AI Prediction Result</div>
-      <div className="summary-card">{typeof result === 'string' ? result : JSON.stringify(result, null, 2)}</div>
-    </div>
-  );
+  return <AIReport response={result} title="AI prediction result" />;
 }
 
 export default function AutoLabel() {
@@ -64,15 +30,17 @@ export default function AutoLabel() {
   const [toast, setToast] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [runResult, setRunResult] = useState(null);
+  const [runError, setRunError] = useState('');
   const [running, setRunning] = useState(false);
   const [runText, setRunText] = useState('');
   const [showRunPanel, setShowRunPanel] = useState(false);
+  const runRequest = useRef(null);
 
   const fetchItems = useCallback(async () => {
     setLoading(true);
     try {
       const res = await api.get('/auto-labels');
-      setItems(Array.isArray(res.data) ? res.data : res.data.data || []);
+      setItems(recordRows(res.data));
     } catch { setItems([]); }
     setLoading(false);
   }, []);
@@ -100,18 +68,37 @@ export default function AutoLabel() {
     } catch (err) { showToast(err.response?.data?.error || 'Failed', 'error'); }
   };
 
+  const cancelRun = () => {
+    runRequest.current?.abort();
+    runRequest.current = null;
+    setRunning(false);
+    setRunError('');
+  };
+
   const handleRunAI = async () => {
-    if (!runText.trim()) return;
+    if (!runText.trim() || runRequest.current) return;
+    const controller = new AbortController();
+    runRequest.current = controller;
     setRunning(true);
     setRunResult(null);
+    setRunError('');
     try {
-      const res = await api.post('/auto-labels/run', { input_text: runText, name: 'Quick AI Label' });
+      const res = await api.post('/auto-labels/run', { input_text: runText, name: 'Quick AI Label' }, { signal: controller.signal });
+      if (runRequest.current !== controller) return;
       setRunResult(res.data);
       fetchItems();
     } catch (err) {
-      showToast(err.response?.data?.error || 'AI labeling failed', 'error');
+      if (runRequest.current === controller && err.code !== 'ERR_CANCELED') {
+        const message = err.response?.data?.error || 'AI labeling failed';
+        setRunError(message);
+        showToast(message, 'error');
+      }
+    } finally {
+      if (runRequest.current === controller) {
+        runRequest.current = null;
+        setRunning(false);
+      }
     }
-    setRunning(false);
   };
 
   const openEdit = (item) => {
@@ -136,21 +123,25 @@ export default function AutoLabel() {
         <div className="ai-section" style={{ marginBottom: 24 }}>
           <div className="ai-section-title">🤖 AI Auto-Labeling</div>
           <div className="ai-section-subtitle">Enter text to get AI-generated labels</div>
+          <PresetButtons
+            presets={AUTO_LABEL_PRESETS}
+            disabled={running}
+            title="Complete prompt examples"
+            description="Each example fills the complete auto-label input with valid text."
+            onApply={({ runText: example }) => { setRunText(example); setRunResult(null); setRunError(''); }}
+          />
           <textarea className="form-textarea" rows={4} value={runText} onChange={(e) => setRunText(e.target.value)} placeholder="Enter text to auto-label..." />
-          <div style={{ marginTop: 12 }}>
+          <div style={{ marginTop: 12, display: 'flex', gap: 12 }}>
             <button className="btn btn-primary" onClick={handleRunAI} disabled={running || !runText.trim()}>
-              {running ? <><span className="spinner spinner-sm"></span> Processing...</> : '🚀 Run Auto-Label'}
+              {running ? 'Generating…' : 'Generate auto-label with OpenRouter'}
             </button>
+            {running && <button type="button" className="btn btn-secondary" onClick={cancelRun}>Cancel</button>}
           </div>
-          {runResult && (
-            <div style={{ marginTop: 16 }}>
-              <AIResultDisplay result={runResult.ai_response} />
-              {runResult.predicted_label && (
-                <div style={{ marginTop: 12, padding: '12px 16px', background: '#1e293b', borderRadius: 8, border: '1px solid #334155' }}>
-                  <strong>Predicted Label:</strong> <span className="badge badge-active">{runResult.predicted_label}</span>
-                  {runResult.confidence && <span style={{ marginLeft: 12 }}>Confidence: <strong>{(runResult.confidence * 100).toFixed(0)}%</strong></span>}
-                </div>
-              )}
+          <AIReport response={runResult?.ai_response ?? runResult} title="AI prediction result" loading={running} error={runError} onRetry={handleRunAI} />
+          {runResult?.predicted_label && (
+            <div style={{ marginTop: 12, padding: '12px 16px', background: '#1e293b', borderRadius: 8, border: '1px solid #334155' }}>
+              <strong>Predicted Label:</strong> <span className="badge badge-active">{runResult.predicted_label}</span>
+              {runResult.confidence != null && <span style={{ marginLeft: 12 }}>Confidence: <strong>{(runResult.confidence * 100).toFixed(0)}%</strong></span>}
             </div>
           )}
         </div>
@@ -194,11 +185,12 @@ export default function AutoLabel() {
                 <div className="detail-field"><div className="detail-label">Model</div><div className="detail-value">{selected.model || '-'}</div></div>
                 <div className="detail-field"><div className="detail-label">Created</div><div className="detail-value">{selected.created_at ? new Date(selected.created_at).toLocaleString() : '-'}</div></div>
               </div>
-              {selected.ai_response && <AIResultDisplay result={selected.ai_response} />}
+              {selected.ai_response !== null && selected.ai_response !== undefined && <AIResultDisplay result={selected.ai_response} />}
             </div>
-            <div className="modal-footer">
-              <button className="btn btn-danger btn-sm" onClick={() => setConfirmDelete(selected)}>Delete</button>
+            <div className="modal-footer modal-footer-centered">
+              <button className="btn btn-secondary btn-sm" onClick={() => setSelected(null)}>Cancel</button>
               <button className="btn btn-primary btn-sm" onClick={() => openEdit(selected)}>Edit</button>
+              <button className="btn btn-danger btn-sm" onClick={() => setConfirmDelete(selected)}>Delete</button>
             </div>
           </div>
         </div>

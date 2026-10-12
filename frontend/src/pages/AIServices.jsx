@@ -1,5 +1,30 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import api from '../api';
+import AIReport from '../components/AIReport';
+import { PresetButtons } from '../components/FullFieldPresets';
+
+const SERVICE_PRESETS = {
+  classify: [
+    { label: 'Support ticket', values: { text: 'The customer reports a duplicate charge on invoice INV-2048 and asks billing support to issue a refund before Friday.' } },
+    { label: 'Product feedback', values: { text: 'The new annotation keyboard shortcuts save time, but image zoom becomes unresponsive after reviewing about fifty records.' } },
+    { label: 'Policy question', values: { text: 'A reviewer asks whether a medical-image label may be approved when the consent field is missing from the source record.' } },
+  ],
+  sentiment: [
+    { label: 'Positive review', values: { text: 'The labeling team delivered ahead of schedule, documented every decision, and resolved our questions quickly.' } },
+    { label: 'Mixed feedback', values: { text: 'The model suggestions are useful and accurate, although the export workflow is slow and the status messages are unclear.' } },
+    { label: 'Escalation', values: { text: 'I am frustrated that the same rejected labels returned after the dataset refresh and need a clear resolution today.' } },
+  ],
+  ner: [
+    { label: 'Partnership news', values: { text: 'LabelAI CEO Maya Chen met Northstar Health in Boston on March 12, 2026 to plan a $2 million annotation program.' } },
+    { label: 'Legal review', values: { text: 'Jordan Ellis of Harbor Legal sent the Acme Services Agreement to Priya Patel in New York on September 30, 2026.' } },
+    { label: 'Product launch', values: { text: 'Orion Labs will launch Atlas Vision at Data Summit Europe in Berlin on November 6, 2026.' } },
+  ],
+  summarize: [
+    { label: 'Quality review', values: { text: 'The weekly quality review covered 1,200 labeled support messages. Agreement rose from 91% to 94% after guideline examples were clarified. Twenty-seven records remain blocked because source language is ambiguous. Reviewers recommend a focused adjudication session, a new gold-set batch, and a follow-up measurement next Friday before expanding the project.' } },
+    { label: 'Dataset update', values: { text: 'Version 3 of the retail image dataset adds 8,400 product photos from two approved suppliers. Automated checks found 146 duplicate files, 38 missing category values, and 12 unsupported formats. The data team quarantined those records and retained the previous version for rollback. Publishing is pending owner approval and completion of the supplier-license review.' } },
+    { label: 'Operations brief', values: { text: 'The annotation operation completed four of five planned batches this week. Throughput met target, but the legal-document queue missed its service level because two reviewers were reassigned. No customer data was exported. The manager proposes moving one trained reviewer back to the queue, prioritizing overdue contracts, and reporting recovery progress at Monday’s stand-up.' } },
+  ],
+};
 
 /* ── helpers to parse AI text responses into structured display ── */
 
@@ -295,19 +320,33 @@ function AIServiceSection({ icon, title, subtitle, type, endpoint, placeholder }
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const request = useRef(null);
+
+  const cancel = () => {
+    request.current?.abort();
+    request.current = null;
+    setLoading(false);
+    setError('');
+  };
 
   const handleRun = async () => {
-    if (!text.trim()) return;
+    if (!text.trim() || request.current) return;
+    const controller = new AbortController();
+    request.current = controller;
     setLoading(true);
     setResult(null);
     setError('');
     try {
-      const res = await api.post(endpoint, { text });
-      setResult(res.data.result || res.data.data || res.data);
+      const res = await api.post(endpoint, { text }, { signal: controller.signal });
+      if (request.current === controller) setResult(res.data.result || res.data.data || res.data);
     } catch (err) {
-      setError(err.response?.data?.error || 'AI service request failed');
+      if (request.current === controller && err.code !== 'ERR_CANCELED') setError(err.response?.data?.error || 'AI service request failed');
+    } finally {
+      if (request.current === controller) {
+        request.current = null;
+        setLoading(false);
+      }
     }
-    setLoading(false);
   };
 
   return (
@@ -315,6 +354,13 @@ function AIServiceSection({ icon, title, subtitle, type, endpoint, placeholder }
       <div className="ai-section-title">{icon} {title}</div>
       <div className="ai-section-subtitle">{subtitle}</div>
 
+      <PresetButtons
+        presets={SERVICE_PRESETS[type]}
+        disabled={loading}
+        title="Complete prompt examples"
+        description="Choose an example to fill the AI input with valid, reviewable content."
+        onApply={({ text: example }) => { setText(example); setResult(null); setError(''); }}
+      />
       <textarea
         className="form-textarea"
         rows={4}
@@ -325,24 +371,17 @@ function AIServiceSection({ icon, title, subtitle, type, endpoint, placeholder }
 
       <div style={{ marginTop: 12, display: 'flex', gap: 12, alignItems: 'center' }}>
         <button className="btn btn-primary" onClick={handleRun} disabled={loading || !text.trim()}>
-          {loading ? (
-            <>
-              <span className="spinner spinner-sm"></span>
-              Processing...
-            </>
-          ) : (
-            `Run ${title}`
-          )}
+          {loading ? 'Generating…' : `Generate ${title} with OpenRouter`}
         </button>
-        {result && (
+        {loading && <button type="button" className="btn btn-secondary" onClick={cancel}>Cancel</button>}
+        {result && !loading && (
           <button className="btn btn-ghost btn-sm" onClick={() => { setResult(null); setError(''); }}>
             Clear Result
           </button>
         )}
       </div>
 
-      {error && <div className="error-banner" style={{ marginTop: 16 }}>{error}</div>}
-      {result && <SmartResultDisplay result={result} type={type} />}
+      <AIReport response={result} title={`${title} result`} loading={loading} error={error} onRetry={handleRun} />
     </div>
   );
 }

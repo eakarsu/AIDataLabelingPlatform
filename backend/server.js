@@ -527,6 +527,26 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
+// Local development shortcut for the already configured demo account. The
+// password stays on the server and no account is created or reset here.
+app.post('/api/auth/demo-login', async (_req, res) => {
+  if (process.env.NODE_ENV === 'production') return res.status(404).json({ error: 'Demo login is unavailable.' });
+  const email = process.env.DEMO_EMAIL;
+  const password = process.env.DEMO_PASSWORD;
+  if (!email || !password) return res.status(503).json({ error: 'Demo credentials are not configured.' });
+  try {
+    const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+    const user = result.rows[0];
+    if (!user || !(await bcrypt.compare(password, user.password))) {
+      return res.status(503).json({ error: 'The configured demo account is unavailable.' });
+    }
+    const token = jwt.sign({ id: user.id, email: user.email, name: user.name, role: user.role, tenant_id: user.tenant_id }, JWT_SECRET, { expiresIn: '24h' });
+    res.json({ user: { id: user.id, email: user.email, name: user.name, role: user.role, created_at: user.created_at }, token });
+  } catch (_) {
+    res.status(503).json({ error: 'Demo login is unavailable.' });
+  }
+});
+
 app.get('/api/auth/me', authMiddleware, async (req, res) => {
   try {
     const result = await pool.query(
@@ -1325,6 +1345,26 @@ app.post('/api/seed', async (req, res) => {
       ('Sarah Chen', 'paused project', 'project', 12, 'Paused Wildlife Species Identification project', '2025-03-25 11:00:00')
     `);
 
+    // ── Saved Filters (15) ───────────────────────────────────────────────────
+    await client.query(`
+      INSERT INTO saved_filters (user_id, name, page, filters) VALUES
+      (1, 'Active Projects', 'projects', '{"status":"active"}'),
+      (1, 'Paused Projects', 'projects', '{"status":"paused"}'),
+      (1, 'Ready Datasets', 'datasets', '{"status":"ready"}'),
+      (1, 'Completed Datasets', 'datasets', '{"status":"completed"}'),
+      (1, 'High Priority Tasks', 'tasks', '{"priority":"high"}'),
+      (1, 'Tasks In Progress', 'tasks', '{"status":"in_progress"}'),
+      (1, 'Pending Reviews', 'reviews', '{"status":"pending"}'),
+      (1, 'Approved Reviews', 'reviews', '{"status":"approved"}'),
+      (1, 'Active Team Members', 'team', '{"status":"active"}'),
+      (1, 'Failed Imports', 'data-imports', '{"status":"failed"}'),
+      (1, 'Processing Reports', 'reports', '{"status":"processing"}'),
+      (1, 'Completed Exports', 'exports', '{"status":"completed"}'),
+      (1, 'Unread Notifications', 'notifications', '{"is_read":false}'),
+      (1, 'Published Guidelines', 'guidelines', '{"status":"published"}'),
+      (1, 'Active Templates', 'templates', '{"status":"active"}')
+    `);
+
     // ── Templates (15) ───────────────────────────────────────────────────────
     await client.query(`
       INSERT INTO templates (name, type, description, config, status) VALUES
@@ -1345,12 +1385,10 @@ app.post('/api/seed', async (req, res) => {
       ('Deprecated V1 Template', 'project', 'Old template format - do not use', '{"type": "generic", "labels": ["Yes", "No"]}', 'inactive')
     `);
 
-    // Reset sequences for new tables
+    // Reset sequences for new tables after the explicit demo rows are inserted.
     const newTables = ['notifications','comments','guidelines','data_imports','reports','tags','resource_tags','activity_feed','saved_filters','templates'];
     for (const t of newTables) {
-      try {
-        await client.query(`SELECT setval('${t}_id_seq', (SELECT COALESCE(MAX(id),0) FROM ${t}))`);
-      } catch(e) { /* ignore if seq doesn't exist */ }
+      await client.query(`SELECT setval(pg_get_serial_sequence('${t}', 'id'), GREATEST(COALESCE(MAX(id), 0), 1), COUNT(*) > 0) FROM ${t}`);
     }
 
     await client.query('COMMIT');
@@ -1607,6 +1645,14 @@ app.get('/api/health', (req, res) => {
 
 // ─── Start Server ────────────────────────────────────────────────────────────
 
+
+// Advisory AI reports only; native execution and approval routes stay unchanged.
+const aiWorkspaceSupport = require("./aiWorkspaceAdapters.cjs");
+const aiWorkspaceDatabase = pool;
+app.use('/api/report-workspace', require("./aiWorkspace.cjs").createAIWorkspaceRouter({
+  pool: aiWorkspaceDatabase, authenticateToken: require("./middleware/auth.js"),
+  aiRateLimiter: aiWorkspaceSupport.createWorkspaceLimiter(), features: require("./aiWorkspaceFeatures.json"),
+}));
 async function start() {
   // Migrations are an explicit operator action; startup only verifies connectivity.
   await pool.query('SELECT 1');

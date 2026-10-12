@@ -1,5 +1,41 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { recordRows } from '../recordRows';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../api';
+import AIReport from '../components/AIReport';
+import { PresetButtons } from '../components/FullFieldPresets';
+
+const FEATURE_PRESETS = [
+  {
+    label: 'Support sentiment', projectOffset: 0, values: {
+      dataItem: 'The replacement works well, but support took five days to answer.',
+      annotationsJson: '[\n  {"annotator":"Sarah Chen","label":"mixed","confidence":0.88},\n  {"annotator":"James Wilson","label":"negative","confidence":0.74},\n  {"annotator":"Maria Garcia","label":"mixed","confidence":0.91}\n]',
+      sampleSize: 10,
+      datasetSummary: 'Customer-support messages in English, labeled as positive, negative, neutral, or mixed. The dataset contains 5,000 records with a long tail of billing and delivery complaints.',
+      labelCount: '4', strategySampleSize: '500', modality: 'text', labeler: 'Sarah Chen',
+      ambigItemsJson: '[\n  {"id":"SUP-104","text":"The replacement works, finally."},\n  {"id":"SUP-219","text":"Not bad once someone answered."},\n  {"id":"SUP-307","text":"It is fine for the price."}\n]',
+    },
+  },
+  {
+    label: 'Legal entities', projectOffset: 2, values: {
+      dataItem: 'Harbor Legal sent the Acme Services Agreement to Priya Patel in New York on September 30, 2026.',
+      annotationsJson: '[\n  {"annotator":"David Kim","label":"organization","confidence":0.93},\n  {"annotator":"Lucas Brown","label":"document_title","confidence":0.86},\n  {"annotator":"Ava Taylor","label":"organization","confidence":0.89}\n]',
+      sampleSize: 12,
+      datasetSummary: 'English commercial contracts requiring person, organization, location, date, and agreement-title entities. Documents include OCR noise and nested legal names.',
+      labelCount: '5', strategySampleSize: '300', modality: 'text', labeler: 'David Kim',
+      ambigItemsJson: '[\n  {"id":"CTR-018","text":"Acme may assign this Agreement to Harbor."},\n  {"id":"CTR-044","text":"The New York office approved the amendment."},\n  {"id":"CTR-071","text":"Effective as of the Closing Date."}\n]',
+    },
+  },
+  {
+    label: 'Retail images', projectOffset: 8, values: {
+      dataItem: 'Studio image of a navy running shoe with a white sole; brand mark is partly occluded.',
+      annotationsJson: '[\n  {"annotator":"Priya Patel","label":"running_shoe","confidence":0.92},\n  {"annotator":"Ethan Wang","label":"sneaker","confidence":0.84},\n  {"annotator":"Emma Johnson","label":"running_shoe","confidence":0.90}\n]',
+      sampleSize: 15,
+      datasetSummary: 'Retail catalog photos labeled by product type, primary color, material, and visible brand. Images include multiple angles, partial occlusion, and supplier background variation.',
+      labelCount: '28', strategySampleSize: '750', modality: 'image', labeler: 'Priya Patel',
+      ambigItemsJson: '[\n  {"id":"IMG-3801","text":"Navy low-top shoe with partly hidden logo."},\n  {"id":"IMG-4022","text":"Black leather footwear; ankle height is unclear."},\n  {"id":"IMG-4170","text":"Two-piece outfit photographed as one product."}\n]',
+    },
+  },
+];
 
 /**
  * AIFeatures.jsx — UI for the new custom AI endpoints from /api/ai-features/*
@@ -18,13 +54,12 @@ function Toast({ message, type, onClose }) {
   return <div className={`toast toast-${type}`}>{type === 'success' ? '✓' : '✕'} {message}</div>;
 }
 
-function ResultBlock({ data }) {
-  if (!data) return null;
-  return (
-    <pre style={{ background: '#0f172a', color: '#cbd5e1', padding: 16, borderRadius: 8, overflow: 'auto', maxHeight: 360 }}>
-      {JSON.stringify(data, null, 2)}
-    </pre>
-  );
+function ResultBlock({ data, title, loading, error, onRetry }) {
+  return <AIReport response={data} title={title} loading={loading} error={error} onRetry={onRetry} />;
+}
+
+function AIRunActions({ running, onRun, onCancel, label }) {
+  return <div className="ai-run-actions"><button className="btn btn-primary" onClick={onRun} disabled={running}>{running ? 'Generating…' : `Generate ${label} with OpenRouter`}</button>{running && <button type="button" className="btn btn-secondary" onClick={onCancel}>Cancel</button>}</div>;
 }
 
 export default function AIFeatures() {
@@ -34,7 +69,9 @@ export default function AIFeatures() {
 
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState(null);
+  const [error, setError] = useState('');
   const [toast, setToast] = useState(null);
+  const request = useRef(null);
 
   // Conflict resolver inputs
   const [dataItem, setDataItem] = useState('');
@@ -62,106 +99,105 @@ export default function AIFeatures() {
   const [historyFeature, setHistoryFeature] = useState('');
 
   useEffect(() => {
-    api.get('/projects').then((r) => setProjects(Array.isArray(r.data) ? r.data : r.data.data || [])).catch(() => setProjects([]));
+    api.get('/projects').then((r) => setProjects(recordRows(r.data))).catch(() => setProjects([]));
   }, []);
 
   const showToast = (message, type = 'success') => setToast({ message, type });
-
-  const runActiveLearning = async () => {
-    if (!projectId) return showToast('Pick a project first', 'error');
-    setRunning(true); setResult(null);
-    try {
-      const r = await api.post(`/ai-features/active-learning/${projectId}`);
-      setResult(r.data); showToast('Active learning prioritization complete');
-    } catch (e) { showToast(e.response?.data?.error || 'Failed', 'error'); }
+  const failValidation = (message) => { setError(message); showToast(message, 'error'); };
+  const cancelRun = () => {
+    request.current?.abort();
+    request.current = null;
     setRunning(false);
+    setError('');
+  };
+  const execute = async (makeRequest, successMessage) => {
+    if (request.current) return;
+    const controller = new AbortController();
+    request.current = controller;
+    setRunning(true); setResult(null); setError('');
+    try {
+      const response = await makeRequest(controller.signal);
+      if (request.current !== controller) return;
+      setResult(response.data);
+      showToast(successMessage);
+    } catch (failure) {
+      if (request.current === controller && failure.code !== 'ERR_CANCELED') {
+        const message = failure.response?.data?.error || 'AI feature request failed';
+        const readable = failure.response?.status === 503 ? `AI not configured: ${message}` : message;
+        setError(readable);
+        showToast(readable, 'error');
+      }
+    } finally {
+      if (request.current === controller) {
+        request.current = null;
+        setRunning(false);
+      }
+    }
+  };
+  const applyPreset = ({ projectOffset, values }) => {
+    const project = projects.find((item) => String(item.id) === projectId) || projects[projectOffset % projects.length];
+    if (!project) return;
+    setProjectId(String(project.id));
+    setDataItem(values.dataItem);
+    setAnnotationsJson(values.annotationsJson);
+    setSampleSize(values.sampleSize);
+    setDatasetSummary(values.datasetSummary);
+    setLabelCount(values.labelCount);
+    setStrategySampleSize(values.strategySampleSize);
+    setModality(values.modality);
+    setLabeler(values.labeler);
+    setAmbigItemsJson(values.ambigItemsJson);
+    setResult(null);
+    setError('');
   };
 
-  const runConflictResolver = async () => {
-    if (!projectId || !dataItem) return showToast('Project + data item required', 'error');
+  const runActiveLearning = () => {
+    if (!projectId) return failValidation('Pick a project first');
+    return execute((signal) => api.post(`/ai-features/active-learning/${projectId}`, undefined, { signal }), 'Active learning prioritization complete');
+  };
+
+  const runConflictResolver = () => {
+    if (!projectId || !dataItem) return failValidation('Project + data item required');
     let annotations;
-    try { annotations = JSON.parse(annotationsJson); } catch { return showToast('Annotations must be valid JSON array', 'error'); }
-    setRunning(true); setResult(null);
-    try {
-      const r = await api.post('/ai-features/conflict-resolver', { project_id: projectId, data_item: dataItem, annotations });
-      setResult(r.data); showToast('Conflict resolved');
-    } catch (e) { showToast(e.response?.data?.error || 'Failed', 'error'); }
-    setRunning(false);
+    try { annotations = JSON.parse(annotationsJson); } catch { return failValidation('Annotations must be valid JSON array'); }
+    return execute((signal) => api.post('/ai-features/conflict-resolver', { project_id: projectId, data_item: dataItem, annotations }, { signal }), 'Conflict resolved');
   };
 
-  const runBiasScan = async () => {
-    if (!projectId) return showToast('Pick a project first', 'error');
-    setRunning(true); setResult(null);
-    try {
-      const r = await api.post(`/ai-features/bias-scan/${projectId}`);
-      setResult(r.data); showToast('Bias scan complete');
-    } catch (e) { showToast(e.response?.data?.error || 'Failed', 'error'); }
-    setRunning(false);
+  const runBiasScan = () => {
+    if (!projectId) return failValidation('Pick a project first');
+    return execute((signal) => api.post(`/ai-features/bias-scan/${projectId}`, undefined, { signal }), 'Bias scan complete');
   };
 
-  const runQASample = async () => {
-    if (!projectId) return showToast('Pick a project first', 'error');
-    setRunning(true); setResult(null);
-    try {
-      const r = await api.post(`/ai-features/qa-sample/${projectId}`, { sample_size: sampleSize });
-      setResult(r.data); showToast('QA sample graded');
-    } catch (e) { showToast(e.response?.data?.error || 'Failed', 'error'); }
-    setRunning(false);
+  const runQASample = () => {
+    if (!projectId) return failValidation('Pick a project first');
+    return execute((signal) => api.post(`/ai-features/qa-sample/${projectId}`, { sample_size: sampleSize }, { signal }), 'QA sample graded');
   };
 
-  const runRecommendStrategy = async () => {
-    if (!projectId && !datasetSummary) return showToast('Pick a project or describe the dataset', 'error');
-    setRunning(true); setResult(null);
-    try {
-      const body = {
-        project_id: projectId || undefined,
-        dataset_summary: datasetSummary || undefined,
-        label_count: labelCount ? parseInt(labelCount) : undefined,
-        sample_size: strategySampleSize ? parseInt(strategySampleSize) : undefined,
-        modality,
-      };
-      const r = await api.post('/ai-features/recommend-label-strategy', body);
-      setResult(r.data); showToast('Strategy recommendation ready');
-    } catch (e) {
-      const code = e.response?.status;
-      const msg = e.response?.data?.error || 'Failed';
-      showToast(code === 503 ? `AI not configured: ${msg}` : msg, 'error');
-    }
-    setRunning(false);
+  const runRecommendStrategy = () => {
+    if (!projectId && !datasetSummary) return failValidation('Pick a project or describe the dataset');
+    const body = {
+      project_id: projectId || undefined,
+      dataset_summary: datasetSummary || undefined,
+      label_count: labelCount ? parseInt(labelCount) : undefined,
+      sample_size: strategySampleSize ? parseInt(strategySampleSize) : undefined,
+      modality,
+    };
+    return execute((signal) => api.post('/ai-features/recommend-label-strategy', body, { signal }), 'Strategy recommendation ready');
   };
 
-  const runLabelerQuality = async () => {
-    if (!labeler) return showToast('Labeler name required', 'error');
-    setRunning(true); setResult(null);
-    try {
-      const body = { project_id: projectId || undefined, labeler };
-      const r = await api.post('/ai-features/labeler-quality-score', body);
-      setResult(r.data); showToast('Labeler quality scored');
-    } catch (e) {
-      const code = e.response?.status;
-      const msg = e.response?.data?.error || 'Failed';
-      showToast(code === 503 ? `AI not configured: ${msg}` : msg, 'error');
-    }
-    setRunning(false);
+  const runLabelerQuality = () => {
+    if (!labeler) return failValidation('Labeler name required');
+    return execute((signal) => api.post('/ai-features/labeler-quality-score', { project_id: projectId || undefined, labeler }, { signal }), 'Labeler quality scored');
   };
 
-  const runIdentifyAmbiguous = async () => {
-    if (!projectId) return showToast('Pick a project first', 'error');
+  const runIdentifyAmbiguous = () => {
+    if (!projectId) return failValidation('Pick a project first');
     let items = [];
     if (ambigItemsJson.trim()) {
       try { items = JSON.parse(ambigItemsJson); }
-      catch { return showToast('Items must be valid JSON array', 'error'); }
+      catch { return failValidation('Items must be valid JSON array'); }
     }
-    setRunning(true); setResult(null);
-    try {
-      const r = await api.post(`/ai-features/identify-ambiguous-items/${projectId}`, { items });
-      setResult(r.data); showToast('Ambiguity scan complete');
-    } catch (e) {
-      const code = e.response?.status;
-      const msg = e.response?.data?.error || 'Failed';
-      showToast(code === 503 ? `AI not configured: ${msg}` : msg, 'error');
-    }
-    setRunning(false);
+    return execute((signal) => api.post(`/ai-features/identify-ambiguous-items/${projectId}`, { items }, { signal }), 'Ambiguity scan complete');
   };
 
   const loadHistory = useCallback(async (p = 1) => {
@@ -170,7 +206,7 @@ export default function AIFeatures() {
       if (historyFeature) params.append('feature', historyFeature);
       if (projectId) params.append('project_id', projectId);
       const r = await api.get(`/ai-features/results?${params.toString()}`);
-      setHistory(r.data.data || []);
+      setHistory(recordRows(r.data));
       setPage(r.data.pagination?.page || 1);
       setTotalPages(r.data.pagination?.totalPages || 1);
     } catch (e) {
@@ -179,6 +215,15 @@ export default function AIFeatures() {
   }, [historyFeature, projectId]);
 
   useEffect(() => { if (tab === 'history') loadHistory(1); }, [tab, loadHistory]);
+  const currentRunner = {
+    active: runActiveLearning,
+    conflict: runConflictResolver,
+    bias: runBiasScan,
+    qa: runQASample,
+    strategy: runRecommendStrategy,
+    quality: runLabelerQuality,
+    ambig: runIdentifyAmbiguous,
+  }[tab];
 
   return (
     <div>
@@ -195,6 +240,15 @@ export default function AIFeatures() {
           {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
         </select>
       </div>
+
+      <PresetButtons
+        presets={FEATURE_PRESETS.map((preset) => ({ label: preset.label, values: preset }))}
+        disabled={running || projects.length === 0}
+        title="Complete AI workflow examples"
+        description="Each example fills every editable AI field on every tab, including optional fields and valid JSON."
+        onApply={applyPreset}
+      />
+      {projects.length === 0 && <p role="status">Create or load a project before using these AI workflow examples.</p>}
 
       <div className="btn-group" style={{ marginBottom: 16, flexWrap: 'wrap' }}>
         {['active', 'conflict', 'bias', 'qa', 'strategy', 'quality', 'ambig', 'history'].map((t) => (
@@ -214,9 +268,7 @@ export default function AIFeatures() {
         <div className="ai-section">
           <div className="ai-section-title">🎯 Active Learning Prioritizer</div>
           <div className="ai-section-subtitle">Rank uncertain items so labelers tackle the highest-impact ones first.</div>
-          <button className="btn btn-primary" onClick={runActiveLearning} disabled={running}>
-            {running ? <><span className="spinner spinner-sm"></span> Running...</> : '🚀 Run'}
-          </button>
+          <AIRunActions running={running} onRun={runActiveLearning} onCancel={cancelRun} label="prioritization" />
         </div>
       )}
 
@@ -229,9 +281,7 @@ export default function AIFeatures() {
           <div className="form-group"><label>Annotations (JSON array of {`{annotator,label,confidence}`})</label>
             <textarea className="form-textarea" value={annotationsJson} rows={6} onChange={(e) => setAnnotationsJson(e.target.value)} />
           </div>
-          <button className="btn btn-primary" onClick={runConflictResolver} disabled={running}>
-            {running ? <><span className="spinner spinner-sm"></span> Resolving...</> : '🚀 Resolve'}
-          </button>
+          <AIRunActions running={running} onRun={runConflictResolver} onCancel={cancelRun} label="conflict resolution" />
         </div>
       )}
 
@@ -239,9 +289,7 @@ export default function AIFeatures() {
         <div className="ai-section">
           <div className="ai-section-title">🧯 Bias Scanner</div>
           <div className="ai-section-subtitle">Surface annotators or classes that skew the dataset.</div>
-          <button className="btn btn-primary" onClick={runBiasScan} disabled={running}>
-            {running ? <><span className="spinner spinner-sm"></span> Scanning...</> : '🚀 Scan'}
-          </button>
+          <AIRunActions running={running} onRun={runBiasScan} onCancel={cancelRun} label="bias scan" />
         </div>
       )}
 
@@ -251,9 +299,7 @@ export default function AIFeatures() {
           <div className="form-group"><label>Sample size (3-20)</label>
             <input className="form-input" type="number" min="3" max="20" value={sampleSize} onChange={(e) => setSampleSize(parseInt(e.target.value) || 10)} />
           </div>
-          <button className="btn btn-primary" onClick={runQASample} disabled={running}>
-            {running ? <><span className="spinner spinner-sm"></span> Grading...</> : '🚀 Sample & Grade'}
-          </button>
+          <AIRunActions running={running} onRun={runQASample} onCancel={cancelRun} label="QA sample" />
         </div>
       )}
 
@@ -280,9 +326,7 @@ export default function AIFeatures() {
               </select>
             </div>
           </div>
-          <button className="btn btn-primary" onClick={runRecommendStrategy} disabled={running}>
-            {running ? <><span className="spinner spinner-sm"></span> Thinking...</> : '🚀 Recommend Strategy'}
-          </button>
+          <AIRunActions running={running} onRun={runRecommendStrategy} onCancel={cancelRun} label="strategy recommendation" />
         </div>
       )}
 
@@ -293,9 +337,7 @@ export default function AIFeatures() {
           <div className="form-group"><label>Labeler name (must match annotator field)</label>
             <input className="form-input" value={labeler} onChange={(e) => setLabeler(e.target.value)} placeholder="alice" />
           </div>
-          <button className="btn btn-primary" onClick={runLabelerQuality} disabled={running}>
-            {running ? <><span className="spinner spinner-sm"></span> Scoring...</> : '🚀 Score Labeler'}
-          </button>
+          <AIRunActions running={running} onRun={runLabelerQuality} onCancel={cancelRun} label="labeler score" />
         </div>
       )}
 
@@ -306,9 +348,7 @@ export default function AIFeatures() {
           <div className="form-group"><label>Optional items to scan (JSON array)</label>
             <textarea className="form-textarea" rows={6} value={ambigItemsJson} onChange={(e) => setAmbigItemsJson(e.target.value)} />
           </div>
-          <button className="btn btn-primary" onClick={runIdentifyAmbiguous} disabled={running}>
-            {running ? <><span className="spinner spinner-sm"></span> Scanning...</> : '🚀 Identify Ambiguous'}
-          </button>
+          <AIRunActions running={running} onRun={runIdentifyAmbiguous} onCancel={cancelRun} label="ambiguity report" />
         </div>
       )}
 
@@ -336,7 +376,7 @@ export default function AIFeatures() {
               <thead><tr><th>ID</th><th>Feature</th><th>Project</th><th>Success</th><th>Created</th></tr></thead>
               <tbody>
                 {history.map((h) => (
-                  <tr key={h.id} onClick={() => setResult(h.output)}>
+                  <tr key={h.id} onClick={() => { setResult(h.output); setError(''); }}>
                     <td>{h.id}</td>
                     <td>{h.feature}</td>
                     <td>{h.project_id || '-'}</td>
@@ -356,10 +396,9 @@ export default function AIFeatures() {
         </div>
       )}
 
-      {result && (
+      {(result !== null || running || error) && (
         <div style={{ marginTop: 24 }}>
-          <h3 style={{ color: '#e2e8f0' }}>Result</h3>
-          <ResultBlock data={result} />
+          <ResultBlock data={result} title={tab === 'history' ? 'Saved AI result' : 'AI feature result'} loading={running} error={error} onRetry={currentRunner} />
         </div>
       )}
     </div>

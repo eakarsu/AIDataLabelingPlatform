@@ -1,3 +1,4 @@
+import { recordRows } from '../recordRows';
 import React, { useState, useEffect, useCallback } from 'react';
 import api from '../api';
 
@@ -10,7 +11,7 @@ export default function AuditLog() {
     setLoading(true);
     try {
       const res = await api.get('/audit-logs');
-      setItems(Array.isArray(res.data) ? res.data : res.data.data || []);
+      setItems(recordRows(res.data));
     } catch { setItems([]); }
     setLoading(false);
   }, []);

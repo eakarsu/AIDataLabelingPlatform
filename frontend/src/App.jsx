@@ -1,3 +1,4 @@
+import AIReportLibrary from "./components/AIReportLibrary";
 import React, { useState, useEffect } from 'react';
 import { Routes, Route, Navigate, Link, useLocation, useNavigate } from 'react-router-dom';
 import Login from './pages/Login';
@@ -157,7 +158,7 @@ function App() {
             {sidebarOpen && <span className="nav-label">Logout</span>}
           </button>
         </div>
-      </aside>
+      <AIReportLibrary /></aside>
       <main className="main-content">
         <Routes>
           <Route path="/dashboard" element={<Dashboard />} />
