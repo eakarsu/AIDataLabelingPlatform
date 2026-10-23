@@ -1,0 +1,37 @@
+'use strict';
+/* FP wave 32C: authenticated tasks + search/filter + CSV/JSON export + domain AI (deterministic fallback). In-memory store; no DB migration. */
+const express = require('express');
+const router = express.Router();
+const auth = require('../middleware/auth');
+router.use(auth);
+
+let seq = 0;
+const tasks = [];
+function ownerOf(req){ const u=req.user||{}; return String(u.id||u.userId||u.email||(u.user&&u.user.id)||'user'); }
+function sanitize(b){ return { title:String(b.title||'').trim(), description:String(b.description||''), status:['todo','in_progress','done'].includes(b.status)?b.status:'todo', priority:['low','medium','high'].includes(b.priority)?b.priority:'medium', assignee:String(b.assignee||''), tags:Array.isArray(b.tags)?b.tags.map(String):[], dueDate:b.dueDate||null }; }
+function filterTasks(list,q){ let out=[...list]; const query=String(q.q||q.search||'').toLowerCase(); if(query) out=out.filter(t=>(t.title+' '+t.description+' '+t.assignee+' '+t.tags.join(' ')).toLowerCase().includes(query)); if(q.status) out=out.filter(t=>t.status===q.status); if(q.priority) out=out.filter(t=>t.priority===q.priority); if(q.assignee) out=out.filter(t=>t.assignee===q.assignee); return out; }
+function toCSV(rows){ const h=['id','title','description','status','priority','assignee','tags','dueDate','createdAt','updatedAt']; const esc=v=>{ if(v===null||v===undefined) return ''; const s=Array.isArray(v)?v.join(';'):String(v); return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s; }; return [h.join(','),...rows.map(r=>h.map(k=>esc(r[k])).join(','))].join('\n'); }
+function hasProvider(){ return !!(process.env.OPENROUTER_API_KEY||process.env.OPENAI_API_KEY); }
+async function aiRespond(feature, sections, fallbackSummary){
+  if(!hasProvider()) return { aiGenerated:false, provider:null, label:'Deterministic fallback — no provider key configured', feature, sections };
+  try{
+    const key=process.env.OPENROUTER_API_KEY||process.env.OPENAI_API_KEY;
+    const base=process.env.OPENROUTER_API_KEY?'https://openrouter.ai/api/v1':'https://api.openai.com/v1';
+    const model=process.env.OPENROUTER_API_KEY?(process.env.OPENROUTER_MODEL||'openai/gpt-4o-mini'):(process.env.OPENAI_MODEL||'gpt-4o-mini');
+    const ctrl=new AbortController(); const to=setTimeout(()=>ctrl.abort(),8000);
+    const r=await fetch(base+'/chat/completions',{method:'POST',signal:ctrl.signal,headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},body:JSON.stringify({model,messages:[{role:'user',content:fallbackSummary+' Data: '+JSON.stringify(sections)}],temperature:0.2})});
+    clearTimeout(to); if(!r.ok) throw new Error('provider '+r.status);
+    const j=await r.json(); const text=j.choices&&j.choices[0]&&j.choices[0].message&&j.choices[0].message.content||'';
+    return { aiGenerated:true, provider:process.env.OPENROUTER_API_KEY?'openrouter':'openai', label:'Provider-generated', feature, sections:{...sections, providerSummary:text} };
+  }catch(e){ return { aiGenerated:false, provider:null, label:'Deterministic fallback — provider unavailable', feature, sections }; }
+}
+router.get('/export',(req,res)=>{ const rows=filterTasks(tasks.filter(t=>t.ownerId===ownerOf(req)),req.query); const fmt=String(req.query.format||'json').toLowerCase(); if(fmt==='csv'){ res.setHeader('Content-Type','text/csv'); res.setHeader('Content-Disposition','attachment; filename="tasks.csv"'); return res.send(toCSV(rows)); } if(fmt!=='json') return res.status(400).json({error:'format must be json or csv'}); res.json({count:rows.length, aiGenerated:false, data:rows}); });
+router.get('/',(req,res)=>{ const rows=filterTasks(tasks.filter(t=>t.ownerId===ownerOf(req)),req.query); res.json({data:rows,count:rows.length,total:rows.length}); });
+router.post('/',(req,res)=>{ const v=sanitize(req.body||{}); if(!v.title) return res.status(400).json({error:'title is required'}); const t={id:++seq,...v,ownerId:ownerOf(req),createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()}; tasks.push(t); res.status(201).json(t); });
+router.get('/:id',(req,res)=>{ const t=tasks.find(x=>x.id===Number(req.params.id)&&x.ownerId===ownerOf(req)); if(!t) return res.status(404).json({error:'Task not found'}); res.json(t); });
+router.put('/:id',(req,res)=>{ const t=tasks.find(x=>x.id===Number(req.params.id)&&x.ownerId===ownerOf(req)); if(!t) return res.status(404).json({error:'Task not found'}); const v=sanitize({...t,...req.body}); if(!v.title) return res.status(400).json({error:'title is required'}); Object.assign(t,v,{updatedAt:new Date().toISOString()}); res.json(t); });
+router.patch('/:id',(req,res)=>{ const t=tasks.find(x=>x.id===Number(req.params.id)&&x.ownerId===ownerOf(req)); if(!t) return res.status(404).json({error:'Task not found'}); const v=sanitize({...t,...req.body}); if(!v.title) return res.status(400).json({error:'title is required'}); Object.assign(t,v,{updatedAt:new Date().toISOString()}); res.json(t); });
+router.post('/ai/suggest-labels', async (req,res)=>{ const mine=tasks.filter(t=>t.ownerId===ownerOf(req)); const open=mine.filter(t=>t.status!=='done'); const high=open.filter(t=>t.priority==='high').length; const score=mine.length===0?0:Math.round((mine.filter(t=>t.status==='done').length/mine.length)*100); const sections={ summary:'Suggest labels for labeling tasks: '+mine.length+' task(s), '+open.length+' open, '+high+' high-priority.', score, count:mine.length, openCount:open.length, highPriority:high, isEmpty:mine.length===0, hasHighPriority:high>0, items:open.slice(0,10).map(t=>({id:t.id,title:t.title,status:t.status,priority:t.priority})), flags:high>0?['high-priority-open']:[] }; res.json(await aiRespond('suggest-labels', sections, 'Suggest labels for labeling tasks')); });
+router.post('/ai/quality-score', async (req,res)=>{ const mine=tasks.filter(t=>t.ownerId===ownerOf(req)); const open=mine.filter(t=>t.status!=='done'); const high=open.filter(t=>t.priority==='high').length; const score=mine.length===0?0:Math.round((mine.filter(t=>t.status==='done').length/mine.length)*100); const sections={ summary:'Score labeling task quality: '+mine.length+' task(s), '+open.length+' open, '+high+' high-priority.', score, count:mine.length, openCount:open.length, highPriority:high, isEmpty:mine.length===0, hasHighPriority:high>0, items:open.slice(0,10).map(t=>({id:t.id,title:t.title,status:t.status,priority:t.priority})), flags:high>0?['high-priority-open']:[] }; res.json(await aiRespond('quality-score', sections, 'Score labeling task quality')); });
+router.post('/ai/prioritize-queue', async (req,res)=>{ const mine=tasks.filter(t=>t.ownerId===ownerOf(req)); const open=mine.filter(t=>t.status!=='done'); const high=open.filter(t=>t.priority==='high').length; const score=mine.length===0?0:Math.round((mine.filter(t=>t.status==='done').length/mine.length)*100); const sections={ summary:'Prioritize labeling queue: '+mine.length+' task(s), '+open.length+' open, '+high+' high-priority.', score, count:mine.length, openCount:open.length, highPriority:high, isEmpty:mine.length===0, hasHighPriority:high>0, items:open.slice(0,10).map(t=>({id:t.id,title:t.title,status:t.status,priority:t.priority})), flags:high>0?['high-priority-open']:[] }; res.json(await aiRespond('prioritize-queue', sections, 'Prioritize labeling queue')); });
+module.exports=router; module.exports._tasks=tasks; module.exports.filterTasks=filterTasks; module.exports.toCSV=toCSV; module.exports._reset=()=>{tasks.length=0;seq=0;};

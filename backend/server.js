@@ -1634,6 +1634,7 @@ app.use('/api/ai', require('./routes/similarityCluster'));
 
 app.use('/api/ai', require('./routes/labelerScoring'));
 app.use('/api/export', require('./routes/export'));
+app.use('/api/tasks', require('./routes/fpTasks'));
 app.use('/api/ai-features', require('./routes/aiFeatures'));
 app.use('/api/governed-workflows', require('./routes/governedWorkflow')(pool));
 
